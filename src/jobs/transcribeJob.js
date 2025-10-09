@@ -1,18 +1,20 @@
-// Handles periodic transcription jobs
+// src/jobs/transcribeJob.js
 import ftp from "ftp";
 import fs from "fs";
 import axios from "axios";
+import FormData from "form-data";
 import { CONFIG } from "../config/env.js";
 
 export async function scanAndTranscribe() {
   console.log("📡 Checking FTP for new recordings...");
 
   const client = new ftp();
+
   client.on("ready", () => {
     client.list(CONFIG.ftpBasePath, (err, dirs) => {
       if (err) throw err;
 
-      dirs.forEach(dir => {
+      dirs.forEach((dir) => {
         const dirPath = `${CONFIG.ftpBasePath}/${dir.name}`;
         client.list(dirPath, async (err, files) => {
           if (err) return;
@@ -20,14 +22,19 @@ export async function scanAndTranscribe() {
           for (const file of files) {
             if (!file.name.endsWith(".wav")) continue;
 
+            // Ensure tmp directory exists
+            fs.mkdirSync(CONFIG.tempDir, { recursive: true });
             const localPath = `${CONFIG.tempDir}/${file.name}`;
+
             client.get(`${dirPath}/${file.name}`, async (err, stream) => {
               if (err) return;
-              stream.pipe(fs.createWriteStream(localPath));
+
+              const writeStream = fs.createWriteStream(localPath);
+              stream.pipe(writeStream);
 
               stream.on("close", async () => {
                 console.log(`🎧 Downloaded: ${file.name}`);
-                await handleAudio(localPath, dir.name);
+                await handleAudio(localPath, dir.name, file.name);
               });
             });
           }
@@ -43,26 +50,28 @@ export async function scanAndTranscribe() {
   });
 }
 
-async function handleAudio(path, extension) {
+async function handleAudio(path, extension, filename) {
   try {
+    // 1️⃣ Transcribe with Whisper
+    const formData = new FormData();
+    formData.append("model", "whisper-1");
+    formData.append("file", fs.createReadStream(path));
+
     const whisperRes = await axios.post(
       "https://api.openai.com/v1/audio/transcriptions",
-      {
-        model: "whisper-1",
-        file: fs.createReadStream(path),
-      },
+      formData,
       {
         headers: {
           Authorization: `Bearer ${CONFIG.openaiKey}`,
-          "Content-Type": "multipart/form-data",
+          ...formData.getHeaders(),
         },
       }
     );
 
-    const transcript = whisperRes.data.text;
+    const transcript = whisperRes.data.text?.trim() || "";
     console.log(`🗣️ Transcript: ${transcript}`);
 
-    // AI analysis
+    // 2️⃣ Analyze with GPT
     const gptRes = await axios.post(
       "https://api.openai.com/v1/chat/completions",
       {
@@ -70,7 +79,8 @@ async function handleAudio(path, extension) {
         messages: [
           {
             role: "system",
-            content: "Analyze the call and return JSON with call_type (fresh/repeat), reason, and sentiment.",
+            content:
+              "Analyze this call transcript and return a JSON with fields: call_type (fresh or repeat), reason, sentiment.",
           },
           { role: "user", content: transcript },
         ],
@@ -84,20 +94,30 @@ async function handleAudio(path, extension) {
       }
     );
 
-    const analysis = gptRes.data.choices[0].message.content;
-    console.log(`🤖 Analysis: ${analysis}`);
+    const analysis = JSON.parse(gptRes.data.choices[0].message.content);
+    console.log(`🤖 Analysis:`, analysis);
 
-    // Send to Laravel
-    await axios.post(CONFIG.apiUrl, {
+    const analysisData = {
       extension,
+      filename,
       transcript,
-      analysis: JSON.parse(analysis),
-    });
+      call_type: analysis.call_type,
+      reason: analysis.reason,
+      sentiment: analysis.sentiment,
+    };
+
+    console.log("📡 Sending payload:", analysisData);
+
+    // 3️⃣ Send to Laravel API
+    await axios.post(CONFIG.apiUrl, analysisData);
 
     console.log("✅ Sent to Laravel successfully!");
   } catch (err) {
-    console.error("❌ Error handling audio:", err.message);
+    console.error(
+      "❌ Error handling audio:",
+      err.response?.data || err.message
+    );
   } finally {
-    fs.unlinkSync(path);
+    if (fs.existsSync(path)) fs.unlinkSync(path);
   }
 }
