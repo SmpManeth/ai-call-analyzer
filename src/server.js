@@ -29,8 +29,8 @@ app.post("/analyze", async (req, res) => {
   }
 });
 
-app.listen(80, "0.0.0.0", () => {
-  console.log("📡 API Server running on port 80...");
+app.listen(4000, "0.0.0.0", () => {
+  console.log("📡 API Server running on port 4000...");
 });
 
 // Start scheduled background job too
