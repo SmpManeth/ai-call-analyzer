@@ -1,59 +1,130 @@
 import express from "express";
 import fs from "fs";
 import path from "path";
+import ftp from "ftp";
 import axios from "axios";
-import multer from "multer";
-import { fileURLToPath } from "url";
 import { CONFIG } from "./config/env.js";
+import { fileURLToPath } from "url";
 
 const app = express();
 app.use(express.json());
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-// Root recordings folder (adjust if needed)
-const recordingsRoot = path.join(__dirname, "recordings");
-
-// ---- POST /analyze ----
 app.post("/analyze", async (req, res) => {
+  const { call_id, recording_file, agent, extension } = req.body;
+
+  if (!recording_file || !extension) {
+    return res.status(400).json({ error: "Missing recording_file or extension" });
+  }
+
+  // 🧠 Get base name without any "(###)" part
+  const baseName = recording_file.replace(/\.wav$/, "");
+  const tmpDir = path.join(__dirname, "tmp");
+  fs.mkdirSync(tmpDir, { recursive: true });
+  let actualFtpFile = null;
+
+  console.log(`🎧 Searching FTP folder for file: ${recording_file}`);
+
   try {
-    const { call_id, recording_file, agent, extension } = req.body;
+    // STEP 1️⃣: Connect to FTP and find actual file
+    await new Promise((resolve, reject) => {
+      const client = new ftp();
 
-    if (!recording_file || !extension) {
-      return res.status(400).json({ error: "Missing file name or extension" });
-    }
+      client.on("ready", () => {
+        client.list(`${CONFIG.ftpBasePath}/${extension}`, (err, list) => {
+          if (err) {
+            client.end();
+            return reject(err);
+          }
 
-    // Build folder and file path
-    const folderPath = path.join(recordingsRoot, extension);
-    const filePath = path.join(folderPath, recording_file);
+          // Find file that starts with our base name
+          const match = list.find(item => item.name.startsWith(baseName));
+          if (match) {
+            actualFtpFile = match.name;
+            console.log(`✅ Found matching file on FTP: ${actualFtpFile}`);
+            resolve();
+          } else {
+            reject(new Error(`No matching file found for ${baseName}`));
+          }
 
-    if (!fs.existsSync(filePath)) {
-      return res.status(404).json({
-        error: `File not found: ${filePath}`,
+          client.end();
+        });
       });
-    }
 
-    console.log(`🎧 Found file for Call ${call_id}: ${filePath}`);
+      client.on("error", reject);
+      client.connect({
+        host: CONFIG.ftpHost,
+        port: 21,
+        user: CONFIG.ftpUser,
+        password: CONFIG.ftpPassword,
+        secure: false,
+        connTimeout: 15000,
+        pasvTimeout: 15000,
+        keepalive: 10000,
+      });
+    });
 
-    // Step 1. Transcribe with Whisper
+    const ftpFilePath = `${CONFIG.ftpBasePath}/${extension}/${actualFtpFile}`;
+    const localPath = path.join(tmpDir, actualFtpFile);
+
+    console.log(`📥 Downloading: ${ftpFilePath}`);
+
+    // STEP 2️⃣: Download the matched file
+    await new Promise((resolve, reject) => {
+      const client = new ftp();
+
+      client.on("ready", () => {
+        client.get(ftpFilePath, (err, stream) => {
+          if (err) {
+            client.end();
+            return reject(err);
+          }
+
+          stream.once("close", () => {
+            client.end();
+            resolve();
+          });
+
+          stream.pipe(fs.createWriteStream(localPath));
+        });
+      });
+
+      client.on("error", reject);
+      client.connect({
+        host: CONFIG.ftpHost,
+        port: 21,
+        user: CONFIG.ftpUser,
+        password: CONFIG.ftpPassword,
+        secure: false,
+        connTimeout: 15000,
+        pasvTimeout: 15000,
+        keepalive: 10000,
+      });
+    });
+
+    console.log(`✅ Downloaded ${actualFtpFile} to ${localPath}`);
+
+    // STEP 3️⃣: Transcribe with Whisper
     const whisperRes = await axios.post(
       "https://api.openai.com/v1/audio/transcriptions",
       {
         model: "whisper-1",
-        file: fs.createReadStream(filePath),
+        file: fs.createReadStream(localPath),
       },
       {
         headers: {
           Authorization: `Bearer ${CONFIG.openaiKey}`,
           "Content-Type": "multipart/form-data",
         },
+        timeout: 120000,
       }
     );
 
-    const transcript = whisperRes.data.text;
+    const transcript = whisperRes.data.text || "";
     console.log(`🗣️ Transcript: ${transcript}`);
 
-    // Step 2. Analyze with GPT
+    // STEP 4️⃣: Analyze with GPT
     const gptRes = await axios.post(
       "https://api.openai.com/v1/chat/completions",
       {
@@ -73,21 +144,40 @@ app.post("/analyze", async (req, res) => {
           Authorization: `Bearer ${CONFIG.openaiKey}`,
           "Content-Type": "application/json",
         },
+        timeout: 90000,
       }
     );
 
-    const analysis = gptRes.data.choices[0].message.content;
-    console.log(`🤖 AI Analysis for Call ${call_id}: ${analysis}`);
+    const analysis = gptRes.data.choices[0]?.message?.content || "{}";
+    console.log(`🤖 AI Analysis: ${analysis}`);
 
-    // (Optional) Send back to Laravel
+    // STEP 5️⃣: Send results to Laravel
     try {
-      await axios.post(`${CONFIG.apiUrl}/ai/callback`, {
-        call_id,
-        analysis: JSON.parse(analysis),
+      const parsed = JSON.parse(analysis);
+      const payload = {
+        extension,
+        filename: actualFtpFile,
+        transcript,
+        sentiment: parsed.sentiment || null,
+        reason: parsed.reason || null,
+        call_type: parsed.call_type || null,
+      };
+
+      const response = await axios.post(`${CONFIG.apiUrl}/ai/store`, payload, {
+        timeout: 15000,
       });
-      console.log(`📡 Sent analysis back to Laravel for Call ${call_id}`);
+
+      console.log(`📡 Sent AI analysis back to Laravel for ${actualFtpFile}`);
+      console.log("📨 Laravel response:", response.data);
     } catch (e) {
       console.error(`⚠️ Failed to send back to Laravel: ${e.message}`);
+    }
+
+    // STEP 6️⃣: Cleanup
+    try {
+      fs.unlinkSync(localPath);
+    } catch (cleanupErr) {
+      console.warn("⚠️ Cleanup failed:", cleanupErr.message);
     }
 
     res.json({
@@ -97,12 +187,11 @@ app.post("/analyze", async (req, res) => {
       analysis: JSON.parse(analysis),
     });
   } catch (err) {
-    console.error("💥 Error analyzing call:", err.message);
+    console.error("💥 Error in /analyze:", err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
-// ---- Start API ----
 app.listen(CONFIG.port || 4000, "0.0.0.0", () => {
   console.log(`📡 AI Analyzer API running on port ${CONFIG.port || 4000}`);
 });

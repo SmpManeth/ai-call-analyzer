@@ -10,5 +10,6 @@ export const CONFIG = {
   scanInterval: parseInt(process.env.SCAN_INTERVAL || "10"),
   openaiKey: process.env.OPENAI_API_KEY,
   apiUrl: process.env.LARAVEL_API_URL,
-  apiPort: process.env.API_PORT || 4000,
+  port: process.env.API_PORT || 4000,
 };
+
