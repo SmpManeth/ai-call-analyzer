@@ -4,7 +4,6 @@ import axios from "axios";
 import FormData from "form-data";
 import { CONFIG } from "../config/env.js";
 
-
 // --------------------------
 //  Transcribe single file
 // --------------------------
@@ -13,16 +12,19 @@ async function transcribeAudio(filePath) {
   form.append("model", "whisper-1");
   form.append("file", fs.createReadStream(filePath));
 
-  const response = await axios.post("https://api.openai.com/v1/audio/transcriptions", form, {
-    headers: {
-      Authorization: `Bearer ${CONFIG.openaiKey}`,
-      ...form.getHeaders(),
-    },
-  });
+  const response = await axios.post(
+    "https://api.openai.com/v1/audio/transcriptions",
+    form,
+    {
+      headers: {
+        Authorization: `Bearer ${CONFIG.openaiKey}`,
+        ...form.getHeaders(),
+      },
+    }
+  );
 
   return response.data.text;
 }
-
 
 // --------------------------
 //  Analyze transcript
@@ -53,7 +55,6 @@ async function analyzeTranscript(transcript) {
   return JSON.parse(response.data.choices[0].message.content);
 }
 
-
 // --------------------------
 //  Send to Laravel
 // --------------------------
@@ -62,11 +63,15 @@ async function sendToLaravel(payload) {
   console.log(`✅ Sent to Laravel for Call ${payload.call_id || "N/A"}`);
 }
 
-
 // --------------------------
 //  Analyze a single recording (manual trigger)
 // --------------------------
-export async function analyzeSingleRecording(recordingFile, callId, agent, extension) {
+export async function analyzeSingleRecording(
+  recordingFile,
+  callId,
+  agent,
+  extension
+) {
   console.log(`🎯 Starting single analysis for ${recordingFile}`);
 
   const localPath = `${CONFIG.tempDir}/${recordingFile}`;
@@ -119,55 +124,57 @@ export async function analyzeSingleRecording(recordingFile, callId, agent, exten
   });
 }
 
-
 // --------------------------
 //  Periodic scan (auto mode)
 // --------------------------
 export async function scanAndTranscribe() {
   console.log("📡 Checking FTP for new recordings...");
+  try {
+    const ftp = new ftpClient();
+    ftp.on("ready", () => {
+      ftp.list(CONFIG.ftpBasePath, async (err, files) => {
+        if (err) return console.error("❌ FTP list error:", err.message);
 
-  const ftp = new ftpClient();
-  ftp.on("ready", () => {
-    ftp.list(CONFIG.ftpBasePath, async (err, files) => {
-      if (err) return console.error("❌ FTP list error:", err.message);
+        for (const file of files) {
+          if (!file.name.endsWith(".wav")) continue;
 
-      for (const file of files) {
-        if (!file.name.endsWith(".wav")) continue;
+          const localPath = `${CONFIG.tempDir}/${file.name}`;
+          await fs.ensureDir(CONFIG.tempDir);
 
-        const localPath = `${CONFIG.tempDir}/${file.name}`;
-        await fs.ensureDir(CONFIG.tempDir);
+          ftp.get(`${CONFIG.ftpBasePath}/${file.name}`, async (err, stream) => {
+            if (err) return console.error("⚠️ FTP get error:", err.message);
 
-        ftp.get(`${CONFIG.ftpBasePath}/${file.name}`, async (err, stream) => {
-          if (err) return console.error("⚠️ FTP get error:", err.message);
+            stream.pipe(fs.createWriteStream(localPath));
+            stream.on("close", async () => {
+              try {
+                console.log(`🎧 Downloaded: ${file.name}`);
 
-          stream.pipe(fs.createWriteStream(localPath));
-          stream.on("close", async () => {
-            try {
-              console.log(`🎧 Downloaded: ${file.name}`);
+                const transcript = await transcribeAudio(localPath);
+                const analysis = await analyzeTranscript(transcript);
 
-              const transcript = await transcribeAudio(localPath);
-              const analysis = await analyzeTranscript(transcript);
+                console.log(`🤖 Analysis for ${file.name}`, analysis);
 
-              console.log(`🤖 Analysis for ${file.name}`, analysis);
+                await sendToLaravel({
+                  transcript,
+                  analysis,
+                });
 
-              await sendToLaravel({
-                transcript,
-                analysis,
-              });
-
-              fs.unlinkSync(localPath);
-            } catch (err) {
-              console.error("❌ Error handling audio:", err.message);
-            }
+                fs.unlinkSync(localPath);
+              } catch (err) {
+                console.error("❌ Error handling audio:", err.message);
+              }
+            });
           });
-        });
-      }
+        }
+      });
     });
-  });
 
-  ftp.connect({
-    host: CONFIG.ftpHost,
-    user: CONFIG.ftpUser,
-    password: CONFIG.ftpPassword,
-  });
+    ftp.connect({
+      host: CONFIG.ftpHost,
+      user: CONFIG.ftpUser,
+      password: CONFIG.ftpPassword,
+    });
+  } catch (err) {
+    console.error("❌ General error in scanAndTranscribe:", err.message);
+  }
 }
