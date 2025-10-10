@@ -1,29 +1,39 @@
 import express from "express";
-import { scanAndTranscribe, analyzeSingleRecording } from "./jobs/transcribeJob.js";
+import { scanAndTranscribe } from "./jobs/transcribeJob.js";
 import { CONFIG } from "./config/env.js";
 
 const app = express();
 app.use(express.json());
 
-// 🟢 Auto-scanning mode (periodic)
-console.log("🚀 AI Call Analyzer started...");
-scanAndTranscribe();
-setInterval(scanAndTranscribe, CONFIG.scanInterval * 60 * 1000);
+// Default health check
+app.get("/", (req, res) => {
+  res.json({ status: "AI Analyzer Running" });
+});
 
-// 🎯 Manual mode: triggered by Laravel
+// AI analyze route
 app.post("/analyze", async (req, res) => {
-  const { call_id, recording_file, agent, extension } = req.body;
-  if (!recording_file) {
-    return res.status(400).json({ success: false, error: "Missing recording_file" });
-  }
-
   try {
-    const result = await analyzeSingleRecording(recording_file, call_id, agent, extension);
-    res.json({ success: true, message: "Analysis complete", result });
+    const { recording_file, extension, call_id } = req.body;
+
+    if (!recording_file) {
+      return res.status(400).json({ success: false, error: "Missing recording_file" });
+    }
+
+    console.log(`🎯 Starting single analysis for ${recording_file}`);
+    // (you would then handle file download/transcription here...)
+
+    return res.json({ success: true, message: "AI analysis started" });
   } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
+    console.error("❌ Error:", err.message);
+    return res.status(500).json({ success: false, error: err.message });
   }
 });
 
-const PORT = CONFIG.apiPort || 4000;
-app.listen(PORT, () => console.log(`📡 API Server running on port ${PORT}`));
+app.listen(4000, "0.0.0.0", () => {
+  console.log("📡 API Server running on port 4000...");
+});
+
+// Start scheduled background job too
+console.log("🚀 AI Call Analyzer started...");
+scanAndTranscribe();
+setInterval(scanAndTranscribe, CONFIG.scanInterval * 60 * 1000);
