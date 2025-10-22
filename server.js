@@ -171,7 +171,8 @@ app.post("/analyze", async (req, res) => {
       console.log(`📡 Sent AI analysis back to Laravel for ${actualFtpFile}`);
       console.log("📨 Laravel response:", response.data);
     } catch (e) {
-      console.error(`⚠️ Failed to send back to Laravel: ${e.message}`);
+      console.log("⚠️ Error sending back to Laravel:", e.response?.data || e.message);
+      console.error(payload);
     }
 
     // STEP 6️⃣: Cleanup
