@@ -163,11 +163,11 @@ app.post("/analyze", async (req, res) => {
         call_type: parsed.call_type || null,
         call_id,
       };
+      console.log("Payload sent to Laravel:", payload);
 
       const response = await axios.post(`${CONFIG.apiUrl}/ai/store`, payload, {
         timeout: 15000,
       });
-      console.log("Payload sent to Laravel:", payload);
       console.log(`📡 Sent AI analysis back to Laravel for ${actualFtpFile}`);
       console.log("📨 Laravel response:", response.data);
     } catch (e) {
