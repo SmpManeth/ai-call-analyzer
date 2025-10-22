@@ -172,7 +172,6 @@ app.post("/analyze", async (req, res) => {
       console.log("📨 Laravel response:", response.data);
     } catch (e) {
       console.log("⚠️ Error sending back to Laravel:", e.response?.data || e.message);
-      console.error(payload);
     }
 
     // STEP 6️⃣: Cleanup
