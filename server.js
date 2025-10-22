@@ -133,7 +133,7 @@ app.post("/analyze", async (req, res) => {
           {
             role: "system",
             content:
-              "Analyze this call transcript and return JSON with call_type (fresh/repeat), reason, and sentiment.",
+              "Analyze this call transcript and return JSON with call_type (fresh/repeat), reason, and sentiment.reason should include which package they are looking for if mentioned. Sentiment should be positive, neutral, or negative. If unsure about any field, return null for that field. Only respond with the JSON object.",
           },
           { role: "user", content: transcript },
         ],
@@ -161,6 +161,7 @@ app.post("/analyze", async (req, res) => {
         sentiment: parsed.sentiment || null,
         reason: parsed.reason || null,
         call_type: parsed.call_type || null,
+        call_id,
       };
 
       const response = await axios.post(`${CONFIG.apiUrl}/ai/store`, payload, {
