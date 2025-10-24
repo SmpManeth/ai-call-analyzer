@@ -164,7 +164,7 @@ app.post("/analyze", async (req, res) => {
           {
             role: "system",
             content:
-              "Analyze this call transcript and return JSON with call_type (fresh/repeat), reason, and sentiment. Reason should include which package they are looking for if mentioned. Sentiment should be positive, neutral, or negative. If unsure about any field, return null. Only respond with the JSON object.",
+              "Analyze this call transcript and return JSON with call_type (fresh/repeat/OCC(OCC means this call is not for Bluelotus Vacations. may be for Some other company)), reason, and sentiment. Reason should include which package they are looking for if mentioned.Package might be a Flight Package or a holiday Package. Sentiment should be positive, neutral, or negative. If unsure about any field, return Not Sure. Only respond with the JSON object.",
           },
           { role: "user", content: transcript },
         ],
