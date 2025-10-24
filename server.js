@@ -15,10 +15,11 @@ app.post("/analyze", async (req, res) => {
   const { call_id, recording_file, agent, extension } = req.body;
 
   if (!recording_file || !extension) {
-    return res.status(400).json({ error: "Missing recording_file or extension" });
+    return res
+      .status(400)
+      .json({ error: "Missing recording_file or extension" });
   }
 
-  // 🧠 Get base name without any "(###)" part
   const baseName = recording_file.replace(/\.wav$/, "");
   const tmpDir = path.join(__dirname, "tmp");
   fs.mkdirSync(tmpDir, { recursive: true });
@@ -27,7 +28,7 @@ app.post("/analyze", async (req, res) => {
   console.log(`🎧 Searching FTP folder for file: ${recording_file}`);
 
   try {
-    // STEP 1️⃣: Connect to FTP and find actual file
+    // STEP 1️⃣: Connect to FTP and find actual file (closest timestamp match)
     await new Promise((resolve, reject) => {
       const client = new ftp();
 
@@ -38,11 +39,39 @@ app.post("/analyze", async (req, res) => {
             return reject(err);
           }
 
-          // Find file that starts with our base name
-          const match = list.find(item => item.name.startsWith(baseName));
-          if (match) {
-            actualFtpFile = match.name;
-            console.log(`✅ Found matching file on FTP: ${actualFtpFile}`);
+          // 🔍 Smarter filename match
+          const prefixMatch = baseName.replace(/_\d{14}$/, ""); // strip timestamp
+          const timeMatch = recording_file.match(/_(\d{14})/);
+          const targetTime = timeMatch ? timeMatch[1] : null;
+
+          let bestFile = null;
+          let bestDiff = Infinity;
+
+          list.forEach((item) => {
+            if (!item.name.startsWith(prefixMatch)) return;
+
+            const m = item.name.match(/_(\d{14})/);
+            if (!m) return;
+
+            if (!targetTime) {
+              if (!bestFile) bestFile = item.name;
+              return;
+            }
+
+            const diff = Math.abs(
+              parseInt(m[1], 10) - parseInt(targetTime, 10)
+            );
+            if (diff < bestDiff) {
+              bestDiff = diff;
+              bestFile = item.name;
+            }
+          });
+
+          if (bestFile) {
+            actualFtpFile = bestFile;
+            console.log(
+              `✅ Matched closest recording on FTP: ${actualFtpFile}`
+            );
             resolve();
           } else {
             reject(new Error(`No matching file found for ${baseName}`));
@@ -70,7 +99,7 @@ app.post("/analyze", async (req, res) => {
 
     console.log(`📥 Downloading: ${ftpFilePath}`);
 
-    // STEP 2️⃣: Download the matched file
+    // STEP 2️⃣: Download file
     await new Promise((resolve, reject) => {
       const client = new ftp();
 
@@ -117,7 +146,9 @@ app.post("/analyze", async (req, res) => {
           Authorization: `Bearer ${CONFIG.openaiKey}`,
           "Content-Type": "multipart/form-data",
         },
-        timeout: 120000,
+        timeout: 600000, // 10 min
+        maxContentLength: Infinity,
+        maxBodyLength: Infinity,
       }
     );
 
@@ -133,7 +164,7 @@ app.post("/analyze", async (req, res) => {
           {
             role: "system",
             content:
-              "Analyze this call transcript and return JSON with call_type (fresh/repeat), reason, and sentiment.reason should include which package they are looking for if mentioned. Sentiment should be positive, neutral, or negative. If unsure about any field, return null for that field. Only respond with the JSON object.",
+              "Analyze this call transcript and return JSON with call_type (fresh/repeat), reason, and sentiment. Reason should include which package they are looking for if mentioned. Sentiment should be positive, neutral, or negative. If unsure about any field, return null. Only respond with the JSON object.",
           },
           { role: "user", content: transcript },
         ],
@@ -171,7 +202,10 @@ app.post("/analyze", async (req, res) => {
       console.log(`📡 Sent AI analysis back to Laravel for ${actualFtpFile}`);
       console.log("📨 Laravel response:", response.data);
     } catch (e) {
-      console.log("⚠️ Error sending back to Laravel:", e.response?.data || e.message);
+      console.log(
+        "⚠️ Error sending back to Laravel:",
+        e.response?.data || e.message
+      );
     }
 
     // STEP 6️⃣: Cleanup
