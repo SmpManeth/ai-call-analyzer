@@ -159,12 +159,38 @@ app.post("/analyze", async (req, res) => {
     const gptRes = await axios.post(
       "https://api.openai.com/v1/chat/completions",
       {
-        model: "gpt-4-turbo",
+        model: "gpt-4.1",
         messages: [
           {
             role: "system",
-            content:
-              "Analyze this call transcript and return JSON with call_type (fresh/repeat/OCC(OCC means this call is not for Bluelotus Vacations. may be for Some other company.OCC calls also can be a fresh call or a Repeat call sometimes. becasue Sales agents are converting them to trust them and book with them so those will be Fresh sometimes.)) if they dont mention a company name, but asking for agent names or any packages that they already baught, those calls we can refer as repeat, reason, and sentiment. Reason should include which package they are looking for if mentioned.Package might be a Flight Package or a holiday Package or may be regarding any payments. Sentiment should be positive, neutral, or negative. If unsure about any field, return Not Sure. Only respond with the JSON object.",
+            content: `
+    You are an AI call-analysis expert. Analyze the following call transcript and return a strict JSON object with these exact fields:
+    
+    {
+      "call_type": "fresh" | "repeat" | "OCC",
+      "reason": string,
+      "sentiment": "positive" | "neutral" | "negative" | "Not Sure"
+    }
+    
+    ### CALL TYPE LOGIC
+    - **fresh** → Caller is contacting Blue Lotus Vacations for the first time or becomes interested in booking after initially unrelated (OCC) talk.
+    - **repeat** → Caller mentions a previous call, booking, payment, reference, or asks for a specific agent by name. Even without a company name, any agent request = repeat.
+    - **OCC** → Entire call is unrelated to Blue Lotus Vacations and stays unrelated. Use only when clearly unrelated.
+    
+    If unsure between OCC and another type, prefer **fresh** or **repeat**.
+    
+    ### REASON
+    Summarize what the call is about (e.g., “Inquiry about Thailand holiday package,” “Requested Emirates flight reference,” “Payment follow-up”).  
+    If unclear, return “Not Sure”.
+    
+    ### SENTIMENT
+    - positive → polite, cooperative, or happy  
+    - neutral → factual or calm  
+    - negative → angry or frustrated  
+    If unsure, return “Not Sure”.
+    
+    Return **only valid JSON**.
+            `,
           },
           { role: "user", content: transcript },
         ],
