@@ -164,7 +164,7 @@ app.post("/analyze", async (req, res) => {
           {
             role: "system",
             content:
-              "Analyze this call transcript and return JSON with call_type (fresh/repeat/OCC(OCC means this call is not for Bluelotus Vacations. may be for Some other company)), reason, and sentiment. Reason should include which package they are looking for if mentioned.Package might be a Flight Package or a holiday Package or may be regarding any payments. Sentiment should be positive, neutral, or negative. If unsure about any field, return Not Sure. Only respond with the JSON object.",
+              "Analyze this call transcript and return JSON with call_type (fresh/repeat/OCC(OCC means this call is not for Bluelotus Vacations. may be for Some other company.OCC calls also can be a fresh call or a Repeat call sometimes. becasue Sales agents are converting them to trust them and book with them so those will be Fresh sometimes.)) if they dont mention a company name, but asking for agent names or any packages that they already baught, those calls we can refer as repeat, reason, and sentiment. Reason should include which package they are looking for if mentioned.Package might be a Flight Package or a holiday Package or may be regarding any payments. Sentiment should be positive, neutral, or negative. If unsure about any field, return Not Sure. Only respond with the JSON object.",
           },
           { role: "user", content: transcript },
         ],
