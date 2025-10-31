@@ -163,33 +163,44 @@ app.post("/analyze", async (req, res) => {
         messages: [
           {
             role: "system",
-            content: `
-    You are an AI call-analysis expert. Analyze the following call transcript and return a strict JSON object with these exact fields:
-    
-    {
-      "call_type": "fresh" | "repeat" | "OCC",
-      "reason": string,
-      "sentiment": "positive" | "neutral" | "negative" | "Not Sure"
-    }
-    
-    ### CALL TYPE LOGIC
-    - **fresh** → Caller is contacting Blue Lotus Vacations for the first time or becomes interested in booking after initially unrelated (OCC) talk.
-    - **repeat** → Caller mentions a previous call, booking, payment, reference, or asks for a specific agent by name. Even without a company name, any agent request = repeat.
-    - **OCC** → Entire call is unrelated to Blue Lotus Vacations and stays unrelated. Use only when clearly unrelated.
-    
-    If unsure between OCC and another type, prefer **fresh** or **repeat**.
-    
-    ### REASON
-    Summarize what the call is about (e.g., “Inquiry about Thailand holiday package,” “Requested Emirates flight reference,” “Payment follow-up”).  
-    If unclear, return “Not Sure”.
-    
-    ### SENTIMENT
-    - positive → polite, cooperative, or happy  
-    - neutral → factual or calm  
-    - negative → angry or frustrated  
-    If unsure, return “Not Sure”.
-    
-    Return **only valid JSON**.
+            content: `You are an AI call-analysis expert. Analyze the following call transcript and return a strict JSON object with these exact fields:
+
+{
+  "call_type": "fresh" | "repeat" | "OCC",
+  "reason": string,
+  "sentiment": "positive" | "neutral" | "negative" | "Not Sure",
+  "agent_tone": "positive" | "slightly_positive" | "neutral" | "slightly_negative" | "negative" | "Not Sure"
+}
+
+### CALL TYPE LOGIC
+- **fresh** → Caller is contacting Blue Lotus Vacations for the first time or becomes interested in booking after initially unrelated (OCC) talk.
+- **repeat** → Caller mentions a previous call, booking, payment, reference, or asks for a specific agent by name. Even without a company name, any agent request = repeat.
+- **OCC** → Entire call is unrelated to Blue Lotus Vacations and stays unrelated. Use only when clearly unrelated.
+If unsure between OCC and another type, prefer **fresh** or **repeat**.
+
+### REASON
+Summarize what the call is about (e.g., “Inquiry about Thailand holiday package,” “Requested Emirates flight reference,” “Payment follow-up”).
+If unclear, return “Not Sure”.
+
+### SENTIMENT
+- **positive** → caller is polite, cooperative, or happy
+- **neutral** → calm, factual, or purely administrative
+- **negative** → caller is angry, frustrated, dismissive, or rude
+If unsure, return “Not Sure”.
+
+### AGENT_TONE
+Classify the agent's tone based on professionalism, empathy, and communication clarity:
+
+- **positive** → consistently polite, empathetic, confident, and helpful throughout.
+- **slightly_positive** → mostly polite and calm but shows small signs of uncertainty or mild defensiveness.
+- **neutral** → professional and factual but emotionally flat or mechanical; not clearly empathetic or rude.
+- **slightly_negative** → polite but noticeably hesitant, unprepared, defensive, or unable to provide clear information, which may frustrate the customer.
+- **negative** → rude, dismissive, sarcastic, hostile, unprofessional, or showing clear impatience.
+If uncertain, return “Not Sure”.
+
+### OUTPUT
+Return only valid JSON with no explanations, text, or commentary outside the JSON.
+
             `,
           },
           { role: "user", content: transcript },
@@ -218,6 +229,7 @@ app.post("/analyze", async (req, res) => {
         sentiment: parsed.sentiment || null,
         reason: parsed.reason || null,
         call_type: parsed.call_type || null,
+        agent_tone: parsed.agent_tone || null,
         call_id,
       };
       console.log("Payload sent to Laravel:", payload);
